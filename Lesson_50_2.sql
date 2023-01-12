@@ -1,54 +1,99 @@
--- Задание 1
+-- Задание 2
 --
--- 1. Создать таблицу `student` с полями `student_id serial`,
---   `first_name varchar`, `last_name varchar`, `birthday date`, `phone varchar`
+-- Подключиться к БД Northwind и сделать следующие изменения:
+-- 
+-- 1. добавить ограничение на поле `unit_price` таблицы `products` (цена должна быть больше `0`)
 --
-CREATE TABLE student
+-- pgAdmin слетел, оставив ограничение на поле, поэтому сначала его снимаю, потом устанавливаю
+ALTER TABLE products 
+DROP CONSTRAINT chk_products_unit_price
+
+ALTER TABLE products 
+ADD CONSTRAINT chk_products_unit_price CHECK (unit_price > 0)
+
+
+--
+-- 2. добавить ограничение, что поле `discontinued` таблицы `products`
+--    может содержать только значения `0` или `1`
+-- 
+ALTER TABLE products 
+ADD CONSTRAINT chk_products_discontinued CHECK (discontinued IN (0, 1))
+
+ALTER TABLE products 
+DROP CONSTRAINT chk_products_discontinued
+
+--
+-- 3.  Создать новую таблицу, содержащую все продукты, снятые с продажи (`discontinued = 1`)
+--
+SELECT * INTO prod_discountinued
+FROM products WHERE discontinued = 1
+
+SELECT * FROM prod_discountinued
+
+INSERT INTO prod_discountinued
+SELECT * FROM products WHERE products.discontinued = 1
+
+DROP TABLE prod_discountinued
+
+--
+-- 4. Удалить из `products` товары, снятые с продажи (`discontinued = 1`)
+--
+-- Долго разбирались с Кириллом как правильно сделать задание - что делать с 
+-- удаляемыми записями. Решил по собственному опыту их не удалять (могут позже пригодиться),
+-- а вынести в отдельную БД с префиксом _deleted. Сначала выношу 310 записей из order_details
+-- (из зависимой таблицы) в таблицу order_details_deleted, затем из product 10 записей в
+-- таблицу product_deleted, зависимость не устанавливаю. Таким образом в исходных таблицах
+-- актуальная информация, и вся начальная БД может быть восстановлена.
+
+SELECT * FROM order_details
+JOIN products USING (product_id)
+WHERE products.discontinued = 1		--> 310 - записи на перемещение
+
+CREATE TABLE order_details_deleted	--> Создаю таблицу для удаляемых записей
 (
-	student_id serial,
-	first_name varchar,
-	last_name varchar,
-	birthday date,
-	phone varchar
+	order_id smallint,
+	product_id smallint,
+	unit_price real,
+	quantity smallint,
+	discount smallint
 )
 
---
--- 2. Добавить в таблицу после создания колонку `middle_name varchar`
---
-ALTER TABLE student ADD COLUMN middle_name varchar
 
---
--- 3. Удалить колонку `middle_name`
---
-ALTER TABLE student DROP COLUMN middle_name
-
---
--- 4. Переименовать колонку `birthday` в `birth_date`
---
-ALTER TABLE student RENAME birthday TO birth_date
-
---
--- 5. Изменить тип данных колонки `phone` на `varchar(32)`
---
-ALTER TABLE student
-ALTER COLUMN phone SET DATA TYPE varchar(32)
-
---
--- 6. Вставить три любых записи с автогенерацией идентификатора
---
-INSERT INTO student (first_name, last_name) VALUES ('Иван', 'Иванов');
-INSERT INTO student (first_name, last_name) VALUES ('Петр', 'Петров');
-INSERT INTO student (first_name, last_name) VALUES ('Jon', 'Jonson')
-
-SELECT * FROM student
-
---
--- 7. Удалить все данные из таблицы со сбросом идентификатор в исходное состояние
---
-TRUNCATE TABLE student RESTART IDENTITY
-
-SELECT * FROM student
+INSERT INTO order_details_deleted
+SELECT order_id, product_id, 0, quantity, discount FROM order_details
+JOIN products USING (product_id)
+WHERE products.discontinued = 1		--> 310 - записи вставлены
 
 
+SELECT * FROM order_details_deleted		--> 310
 
 
+SELECT * INTO products_deleted
+FROM products WHERE discontinued = 1
+
+SELECT * FROM products_deleted		--> 10
+
+-- Удаляемые данные сохранены, можно актуализировать БД
+-- Освобождаюсь от FOREING KEY
+ALTER TABLE order_details DROP CONSTRAINT fk_order_details_products
+
+-- Создаю его по-новой с каскадным удалением
+ALTER TABLE order_details ADD CONSTRAINT fk_order_details_products
+FOREIGN KEY (product_id)
+REFERENCES products (product_id)
+ON DELETE CASCADE
+
+-- Можно удалять записи
+
+-- Состояние таблиц до удаления
+SELECT * FROM order_details			--> 2155 записей
+SELECT * FROM products				-- > 77 записей
+
+DELETE FROM products WHERE discontinued = 1
+
+-- Состояние после удаления
+SELECT * FROM order_details			--> 1845 записей
+SELECT * FROM order_details_deleted	--> 310
+
+SELECT * FROM products				-- > 77
+SELECT * FROM products_deleted		--> 10
